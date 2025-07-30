@@ -1,5 +1,5 @@
 import LoadGameButton from "../../loadGame/loadGameButton";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useChessActions } from "@/hooks/useChessActions";
 import {
   boardAtom,
@@ -12,8 +12,8 @@ import { useGameDatabase } from "@/hooks/useGameDatabase";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Chess } from "chess.js";
 import { useRouter } from "next/router";
-import { decodeBase64 } from "@/lib/helpers";
-import { Game } from "@/types/game";
+import { GameEval } from "@/types/eval";
+import { fetchLichessGame } from "@/lib/lichess";
 
 export default function LoadGame() {
   const router = useRouter();
@@ -25,58 +25,61 @@ export default function LoadGame() {
   const setBoardOrientation = useSetAtom(boardOrientationAtom);
   const evaluationProgress = useAtomValue(evaluationProgressAtom);
 
+  const joinedGameHistory = useMemo(() => game.history().join(), [game]);
+
   const resetAndSetGamePgn = useCallback(
-    (pgn: string) => {
+    (pgn: string, orientation?: boolean, gameEval?: GameEval) => {
+      const gameFromPgn = new Chess();
+      gameFromPgn.loadPgn(pgn);
+      if (joinedGameHistory === gameFromPgn.history().join()) return;
+
       resetBoard(pgn);
-      setEval(undefined);
+      setEval(gameEval);
       setGamePgn(pgn);
+      setBoardOrientation(orientation ?? true);
     },
-    [resetBoard, setGamePgn, setEval]
+    [joinedGameHistory, resetBoard, setGamePgn, setEval, setBoardOrientation]
   );
 
-  const { pgn: pgnParam, orientation: orientationParam } = router.query;
+  const { lichessGameId, orientation: orientationParam } = router.query;
 
   useEffect(() => {
-    const loadGameFromIdParam = (gameUrl: Game) => {
-      const gamefromDbChess = new Chess();
-      gamefromDbChess.loadPgn(gameUrl.pgn);
-      if (game.history().join() === gamefromDbChess.history().join()) return;
-
-      resetAndSetGamePgn(gameUrl.pgn);
-      setEval(gameUrl.eval);
-      setBoardOrientation(
-        gameUrl.black.name === "You" && gameUrl.site === "Chesskit.org"
-          ? false
-          : true
-      );
-    };
-
-    const loadGameFromPgnParam = (encodedPgn: string) => {
-      const decodedPgn = decodeBase64(encodedPgn);
-      if (!decodedPgn) return;
-
-      const gameFromPgnParam = new Chess();
-      gameFromPgnParam.loadPgn(decodedPgn || "");
-      if (game.history().join() === gameFromPgnParam.history().join()) return;
-
-      resetAndSetGamePgn(decodedPgn);
-      setBoardOrientation(orientationParam !== "black");
+    const handleLichess = async (id: string) => {
+      const res = await fetchLichessGame(id);
+      if (typeof res === "string") {
+        resetAndSetGamePgn(res, orientationParam !== "black");
+      }
     };
 
     if (gameFromUrl) {
-      loadGameFromIdParam(gameFromUrl);
-    } else if (typeof pgnParam === "string") {
-      loadGameFromPgnParam(pgnParam);
+      const orientation = !(
+        gameFromUrl.site === "Chesskit.org" && gameFromUrl.black.name === "You"
+      );
+      resetAndSetGamePgn(gameFromUrl.pgn, orientation, gameFromUrl.eval);
+    } else if (typeof lichessGameId === "string" && !!lichessGameId) {
+      handleLichess(lichessGameId);
     }
-  }, [
-    gameFromUrl,
-    pgnParam,
-    orientationParam,
-    game,
-    resetAndSetGamePgn,
-    setEval,
-    setBoardOrientation,
-  ]);
+  }, [gameFromUrl, lichessGameId, orientationParam, resetAndSetGamePgn]);
+
+  useEffect(() => {
+    const eventHandler = (event: MessageEvent) => {
+      try {
+        if (!event?.data?.pgn) return;
+        const { pgn, orientation } = event.data as {
+          pgn: string;
+          orientation?: "white" | "black";
+        };
+        resetAndSetGamePgn(pgn, orientation !== "black");
+      } catch (error) {
+        console.error("Error processing message event:", error);
+      }
+    };
+    window.addEventListener("message", eventHandler);
+
+    return () => {
+      window.removeEventListener("message", eventHandler);
+    };
+  }, [resetAndSetGamePgn]);
 
   const isGameLoaded =
     gameFromUrl !== undefined ||
