@@ -93,7 +93,14 @@ export default function LoadGame() {
       label={isGameLoaded ? "Load another game" : "Load game"}
       size="small"
       setGame={async (game) => {
-        await router.push("/");
+        await router.replace(
+          {
+            query: {},
+            pathname: router.pathname,
+          },
+          undefined,
+          { shallow: true, scroll: false }
+        );
         resetAndSetGamePgn(game.pgn());
       }}
     />
