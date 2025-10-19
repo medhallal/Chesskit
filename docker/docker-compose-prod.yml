@@ -7,7 +7,3 @@ services:
     container_name: chesskit
     ports:
       - "10080:80"
-      - "10443:443"
-    volumes:
-      - ./certs/chesskit.org.pem.autosigned:/etc/letsencrypt/live/chesskit.org/fullchain.pem
-      - ./certs/chesskit.org.key.autosigned:/etc/letsencrypt/live/chesskit.org/privkey.pem
